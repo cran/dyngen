@@ -39,25 +39,23 @@
 #' 
 #' @return A dyngen model.
 #' 
+#' @seealso [dyngen] on how to run a complete dyngen simulation
+#' 
 #' @examples
 #' model <- 
 #'   initialise_model(
 #'     backbone = backbone_bifurcating(),
-#'     kinetics = kinetics_default()
+#'     kinetics_params = kinetics_default()
 #'   )
-#'   
+#' 
 #' \donttest{
-#' model <- model %>%
-#'   generate_tf_network() %>%
-#'   generate_feature_network() %>%
-#'   generate_kinetics() %>%
-#'   generate_gold_standard() %>%
-#'   generate_cells() %>%
-#'   generate_experiment()
-#'   
-#' dataset <- wrap_dataset(model)
+#' data("example_model")
+#' model <- example_model %>%
+#'   generate_kinetics()
 #' }
 generate_kinetics <- function(model) {
+  model <- .add_timing(model, "4_kinetics", "checks")
+  
   # satisfy r cmd check
   burn <- mol_premrna <- mol_mrna <- mol_protein <- val <- NULL
   
@@ -67,12 +65,15 @@ generate_kinetics <- function(model) {
   )
   
   # generate kinetics params
+  model <- .add_timing(model, "4_kinetics", "generate kinetics")
   model <- .kinetics_generate_gene_kinetics(model)
   
   # generate formulae
+  model <- .add_timing(model, "4_kinetics", "generate formulae")
   formulae <- .kinetics_generate_formulae(model)
   
   # create variables
+  model <- .add_timing(model, "4_kinetics", "create variables")
   fid <- model$feature_info$feature_id
   model$feature_info$mol_premrna <- paste0("mol_premrna_", fid)
   model$feature_info$mol_mrna <- paste0("mol_mrna_", fid)
@@ -90,6 +91,7 @@ generate_kinetics <- function(model) {
   )
   
   # extract params
+  model <- .add_timing(model, "4_kinetics", "extract parameters")
   parameters <- .kinetics_extract_parameters(
     model$feature_info, 
     model$feature_network
@@ -104,6 +106,7 @@ generate_kinetics <- function(model) {
     pull(val)
     
   # return system
+  model <- .add_timing(model, "4_kinetics", "create output")
   model$simulation_system <- lst(
     reactions = formulae, 
     molecule_ids,
@@ -112,7 +115,7 @@ generate_kinetics <- function(model) {
     burn_variables
   )
   
-  model
+  .add_timing(model, "4_kinetics", "end")
 }
 
 #' @export
@@ -244,9 +247,9 @@ kinetics_default <- function() {
     )
   
   # generate formula per feature
-  out <- furrr::future_map(
+  out <- pbapply::pblapply(
     seq_len(nrow(feature_info)),
-    .progress = model$verbose,
+    cl = model$num_cores,
     function(i) {
       info <- feature_info %>% extract_row_to_list(i)
       
@@ -352,7 +355,7 @@ kinetics_default <- function() {
   unlist(out, recursive = FALSE)
 }
 
-.kinetics_extract_parameters <- function(feature_info, feature_network) {
+.kinetics_extract_parameters_as_df <- function(feature_info, feature_network) {
   # satisfy r cmd check
   feature_id <- transcription_rate <- splicing_rate <- translation_rate <- mrna_decay_rate <- protein_decay_rate <-
     basal <- independence <- param <- value <- id <- from <- to <- dissociation <- hill <- strength <- `.` <- from <- NULL
@@ -362,20 +365,23 @@ kinetics_default <- function() {
     feature_info %>% 
     select(feature_id, transcription_rate, splicing_rate, translation_rate, mrna_decay_rate, protein_decay_rate, bas = basal, ind = independence) %>% 
     gather(param, value, -feature_id) %>% 
-    mutate(id = paste0(param, "_", feature_id)) %>% 
-    select(id, value) %>% 
-    deframe()
+    mutate(id = paste0(param, "_", feature_id), type = "feature_info")
   
   # extract dis, hill, str
   edge_params <- 
     feature_network %>% 
     select(from, to, dis = dissociation, hill, str = strength) %>% 
     gather(param, value, -from, -to) %>% 
-    mutate(id = paste0(param, "_", from, "_", to)) %>% 
-    select(id, value) %>% 
-    deframe()
+    mutate(id = paste0(param, "_", from, "_", to), type = "feature_network")
   
-  c(feature_params, edge_params)
+  bind_rows(feature_params, edge_params)
+}
+
+
+.kinetics_extract_parameters <- function(feature_info, feature_network) {
+  .kinetics_extract_parameters_as_df(feature_info, feature_network) %>% 
+    select(.data$id, .data$value) %>% 
+    deframe()
 }
 
 .kinetics_calculate_basal <- function(effects) {

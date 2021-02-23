@@ -18,8 +18,8 @@ initialise_model(
   simulation_params = simulation_default(),
   experiment_params = experiment_snapshot(),
   verbose = TRUE,
-  download_cache_dir = NULL,
-  num_cores = 1,
+  download_cache_dir = getOption("dyngen_download_cache_dir"),
+  num_cores = getOption("Ncpus") \%||\% 1L,
   id = NULL
 )
 }
@@ -79,21 +79,12 @@ Initial settings for simulating a dyngen dataset
 }
 \examples{
 model <- initialise_model(
-  backbone = backbone_bifurcating()
+  backbone = backbone_bifurcating(),
+  num_cells = 555,
+  verbose = FALSE,
+  download_cache_dir = "~/.cache/dyngen"
 )
-plot_backbone_modulenet(model)
-plot_backbone_statenet(model)
-
-\donttest{
-model <- 
-  model \%>\%
-  generate_tf_network() \%>\%
-  generate_feature_network() \%>\%
-  generate_kinetics() \%>\%
-  generate_gold_standard() \%>\%
-  generate_cells() \%>\%
-  generate_experiment() 
-  
-dataset <- wrap_dataset(model)
 }
+\seealso{
+\link{dyngen} on how to run a complete dyngen simulation
 }

@@ -15,35 +15,33 @@
 #' 
 #' @return A dyngen model.
 #' 
+#' @seealso [dyngen] on how to run a complete dyngen simulation
+#' 
 #' @examples
 #' model <- 
 #'   initialise_model(
-#'     backbone = backbone_bifurcating(),
-#'     tf_network = tf_network_default(min_tfs_per_module = 1L)
-#'   ) %>%
-#'   generate_tf_network()
-#'   
-#' plot_feature_network(model)
+#'     backbone = backbone_bifurcating()
+#'   )
+#' model <- model %>%
+#'   generate_tf_network() 
 #'   
 #' \donttest{
-#' model <- model %>%
-#'   generate_feature_network() %>%
-#'   generate_kinetics() %>%
-#'   generate_gold_standard() %>%
-#'   generate_cells() %>%
-#'   generate_experiment()
-#'   
-#' dataset <- wrap_dataset(model)
+#' plot_feature_network(model)
 #' }
-#'
 generate_tf_network <- function(
   model
 ) {
   if (model$verbose) cat("Generating TF network\n")
   
-  model %>% 
-    .generate_tf_info() %>% 
-    .generate_tf_network()
+  model <- model %>% 
+    .add_timing("2_tf_network", "generate_tf_info") %>% 
+    .generate_tf_info()
+  
+  model <- model %>% 
+    .add_timing("2_tf_network", "generate_tf_network") %>% 
+    .generate_tf_network() 
+  
+  .add_timing(model, "2_tf_network", "end")
 }
 
 #' @export

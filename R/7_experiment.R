@@ -13,7 +13,8 @@
 #' @param pct_between \[synchronised\] The percentage of 'unused' simulation time.
 #' @param realcount The name of a dataset in [realcounts]. If `NULL`, a random
 #'   dataset will be sampled from [realcounts].
-#' @param sample_capture_rate A function that samples values for the simulated capture rates of genes.
+#' @param map_reference_cpm Whether or not to try to match the CPM distribution to that of a reference dataset.
+#' @param map_reference_ls Whether or not to try to match the distribution of the library sizes to that of the reference dataset.
 #' 
 #' @return A dyngen model.
 #' 
@@ -30,24 +31,16 @@
 #'     backbone = backbone_bifurcating(),
 #'     experiment = experiment_synchronised()
 #'   )
-#'
-#' \donttest{
-#' model <- 
-#'   model %>%
-#'   generate_tf_network() %>%
-#'   generate_feature_network() %>%
-#'   generate_kinetics() %>%
-#'   generate_gold_standard() %>%
-#'   generate_cells() %>%
-#'   generate_experiment() 
-#'   
-#' dataset <- wrap_dataset(model)
+#' 
+#' \dontrun{
+#' data("example_model")
+#' model <- example_model %>% generate_experiment() 
+#' 
+#' plot_experiment_dimred(model)
 #' }
 generate_experiment <- function(model) {
-  # satisfy r cmd check
-  cell_id <- step_ix <- sim_time <- simulation_i <- from <- to <- time <- NULL
-  
   if (model$verbose) cat("Simulating experiment\n")
+  model <- .add_timing(model, "7_experiment", "sample cells")
   # first sample the cells from the sample, using the desired number of cells
   step_ixs <- .generate_experiment_sample_cells(model)
   
@@ -69,26 +62,55 @@ generate_experiment <- function(model) {
     mutate(
       cell_id = paste0("cell", row_number())
     ) %>% 
-    select(cell_id, step_ix, simulation_i, sim_time, from, to, time, everything())
+    select(
+      .data$cell_id, 
+      .data$step_ix, 
+      .data$simulation_i, 
+      .data$sim_time, 
+      .data$from, 
+      .data$to, 
+      .data$time, 
+      everything()
+    )
   
   step_ixs <- cell_info$step_ix
   
   # collect true simulated counts of sampled cells
   tsim_counts <- model$simulations$counts[step_ixs, , drop = FALSE]
+  rownames(tsim_counts) <- cell_info$cell_id
+  
+  mol_info <- model$feature_info %>%
+    gather("mol", "val", .data$mol_premrna, .data$mol_mrna, .data$mol_protein) %>% 
+    select(.data$feature_id, .data$mol, .data$val)
   
   # fetch real expression data
+  model <- .add_timing(model, "7_experiment", "fetch realcount")
   realcount <- .generate_experiment_fetch_realcount(model)
   
   # simulate library size variation from real data
-  count_simulation <- .simulate_counts_from_realcounts(tsim_counts, realcount, cell_info, sample_capture_rate = model$experiment_params$sample_capture_rate)
-  sim_counts <- count_simulation$sim_counts
-  cell_info <- count_simulation$cell_info
-  mol_info <- count_simulation$mol_info
+  model <- .add_timing(model, "7_experiment", "simulate library size variation")
+  
+  # process mrna (both premrna and mature)
+  mrna_ids <- mol_info %>% filter(.data$mol != "mol_protein") %>% pull(.data$val)
+  tsim_counts_mrna <- tsim_counts[, mrna_ids, drop = FALSE]
+  count_mrna_simulation <- .simulate_counts_from_realcounts(
+    tsim_counts = tsim_counts_mrna,
+    realcount = realcount,
+    map_reference_cpm = model$experiment_params$map_reference_cpm,
+    map_reference_ls = model$experiment_params$map_reference_ls
+  )
+  
+  # process proteins
+  # TODO: should use real protein dataset for this
+  prot_ids <- mol_info %>% filter(.data$mol == "mol_protein") %>% pull(.data$val)
+  # count_prot_simulation <- .simulate_counts_from_realcounts(tsim_counts[, prot_ids, drop = FALSE], realcount, ...)
+  count_prot_simulation <- tsim_counts[, prot_ids, drop = FALSE]
   
   # split up molecules
-  sim_wcounts <- sim_counts[, model$feature_info$mol_premrna, drop = FALSE]
-  sim_xcounts <- sim_counts[, model$feature_info$mol_mrna, drop = FALSE]
-  sim_ycounts <- sim_counts[, model$feature_info$mol_protein, drop = FALSE]
+  model <- .add_timing(model, "7_experiment", "create output")
+  sim_wcounts <- count_mrna_simulation[, model$feature_info$mol_premrna, drop = FALSE]
+  sim_xcounts <- count_mrna_simulation[, model$feature_info$mol_mrna, drop = FALSE]
+  sim_ycounts <- count_prot_simulation[, model$feature_info$mol_protein, drop = FALSE]
   dimnames(sim_wcounts) <- 
     dimnames(sim_xcounts) <-
     dimnames(sim_ycounts) <- 
@@ -119,69 +141,73 @@ generate_experiment <- function(model) {
     rna_velocity = sim_rna_velocity
   )
   
-  model
+  .add_timing(model, "7_experiment", "end")
 }
 
 
 .simulate_counts_from_realcounts <- function(
   tsim_counts, 
   realcount, 
-  cell_info = tibble(cell_id = rownames(tsim_counts)), 
-  sample_capture_rate = function(n) rnorm(n, 1, 0.05) %>% pmax(0)
+  map_reference_cpm = TRUE,
+  map_reference_ls = TRUE
 ) {
-  # satisfy r cmd check
-  num_molecules <- mult <- id <- NULL
+  # calculate lib sizes and cpms
+  realcount_ls <- Matrix::rowSums(realcount)
+  realcount_cpm <- realcount
+  realcount_cpm@x <- realcount@x / realcount_ls[realcount@i+1] * 1e6
+  
+  tsim_counts_ls <- Matrix::rowSums(tsim_counts)
+  tsim_counts_cpm <- tsim_counts
+  tsim_counts_cpm@x <- tsim_counts@x / tsim_counts_ls[tsim_counts@i+1] * 1e6
+  
+  # map real density on tsim counts
+  tsim_counts_cpm_new <- tsim_counts_cpm
+  
+  if (map_reference_cpm) {
+    # tsim_counts_cpm_new@x <- stats::quantile(realcount_cpm@x, dplyr::percent_rank(tsim_counts_cpm@x))
+    tsim_counts_cpm_new@x <- stats::quantile(realcount_cpm@x, sort(stats::runif(length(tsim_counts_cpm@x)))[order(order(tsim_counts_cpm@x))]) %>% unname
+  }
   
   # simulate library size variation from real data
-  realsums <- Matrix::rowSums(realcount)
-  dist_vals <- realsums / mean(realsums)
-  lib_size <- quantile(dist_vals, runif(nrow(cell_info)))
-  
-  cell_info <-
-    cell_info %>% 
-    mutate(
-      num_molecules = Matrix::rowSums(tsim_counts),
-      mult = quantile(dist_vals, runif(n())),
-      lib_size = sort(round(mean(num_molecules) * mult))[order(order(num_molecules))]
-    )
-  
-  # simulate gene capture variation
-  mol_info <- 
-    tibble(
-      id = colnames(tsim_counts),
-      capture_rate = sample_capture_rate(length(id))
-    )
+  if (map_reference_ls) {
+    # lib_size_new <- round(stats::quantile(realcount_ls, dplyr::percent_rank(tsim_counts_ls)))
+    lib_size_new <- round(stats::quantile(realcount_ls, sort(stats::runif(length(tsim_counts_ls)))[order(order(tsim_counts_ls))])) %>% unname
+  } else {
+    lib_size_new <- tsim_counts_ls
+  }
   
   # simulate sampling of molecules
-  tsim_counts_t <- Matrix::t(tsim_counts)
-  for (cell_i in seq_len(nrow(cell_info))) {
-    pi <- tsim_counts_t@p[[cell_i]] + 1
+  tsim_counts_t <- Matrix::t(tsim_counts_cpm_new)
+  new_vals <- unlist(map(seq_along(lib_size_new), function(cell_i) {
+    pi <- tsim_counts_t@p[[cell_i]]
     pj <- tsim_counts_t@p[[cell_i + 1]]
-    gene_is <- tsim_counts_t@i[pi:pj] + 1
-    gene_vals <- tsim_counts_t@x[pi:pj]
-    
-    lib_size <- cell_info$lib_size[[cell_i]]
-    cap_rates <- mol_info$capture_rate[gene_is]
-    
-    probs <- cap_rates * gene_vals
-    probs[probs < 0] <- 0 # sometimes these can become zero due to rounding errors
-    
-    new_vals <- rmultinom(1, lib_size, probs)
-    
-    tsim_counts_t@x[pi:pj] <- new_vals
-  }
+    if (pi != pj) {
+      pix <- seq(pi + 1, pj, 1)
+      gene_is <- tsim_counts_t@i[pix] + 1
+      gene_vals <- tsim_counts_t@x[pix]
+      lib_size <- lib_size_new[[cell_i]]
+      
+      # sample 'lib_size' molecules for each of the genes, weighted by 'gene_vals'
+      tryCatch({
+      rmultinom(1, lib_size, gene_vals)
+      }, error = function(e) {
+        cat("cell_i: ", cell_i, ", lib_size: ", lib_size, "\n", sep = "")
+        print(gene_vals)
+        print(e)
+      })
+    } else {
+      integer(0)
+    }
+  })) %>% as.numeric
+  
+  tsim_counts_t@x <- new_vals
   sim_counts <- Matrix::drop0(Matrix::t(tsim_counts_t))
   
-  lst(
-    sim_counts,
-    cell_info,
-    mol_info
-  )
+  sim_counts
 }
 
 #' @export
 #' @rdname generate_experiment
-#' @importFrom GillespieSSA2 ssa_etl
 list_experiment_samplers <- function() {
   lst(
     snapshot = experiment_snapshot,
@@ -189,23 +215,33 @@ list_experiment_samplers <- function() {
   )
 }
 
+.sample_decent_realcount <- function() {
+  # satisfy r cmd check
+  realcounts <- NULL
+  
+  data(realcounts, package = "dyngen", envir = environment())
+  
+  realcounts %>% 
+    filter(.data$qc_pass) %>%
+    pull(.data$name) %>% 
+    sample(1)
+}
+
 #' @rdname generate_experiment
 #' @export
 experiment_snapshot <- function(
   realcount = NULL,
-  sample_capture_rate = function(n) rnorm(n, 1, .05) %>% pmax(0),
+  map_reference_cpm = TRUE,
+  map_reference_ls = TRUE,
   weight_bw = 0.1
 ) {
-  # satisfy r cmd check
-  realcounts <- NULL
-  
   if (is.null(realcount)) {
-    data(realcounts, package = "dyngen", envir = environment())
-    realcount <- sample(realcounts$name, 1)
+    realcount <- .sample_decent_realcount()
   }
   lst(
     realcount,
-    sample_capture_rate,
+    map_reference_cpm,
+    map_reference_ls,
     fun = .generate_experiment_snapshot,
     weight_bw
   )
@@ -215,20 +251,18 @@ experiment_snapshot <- function(
 #' @export
 experiment_synchronised <- function(
   realcount = NULL,
-  sample_capture_rate = function(n) rnorm(n, 1, .05) %>% pmax(0),
+  map_reference_cpm = TRUE,
+  map_reference_ls = TRUE,
   num_timepoints = 8,
   pct_between = .75
 ) {
-  # satisfy r cmd check
-  realcounts <- NULL
-  
   if (is.null(realcount)) {
-    data(realcounts, package = "dyngen", envir = environment())
-    realcount <- sample(realcounts$name, 1)
+    realcount <- .sample_decent_realcount()
   }
   lst(
     realcount,
-    sample_capture_rate,
+    map_reference_cpm,
+    map_reference_ls,
     fun = .generate_experiment_synchronised,
     num_timepoints,
     pct_between
@@ -236,9 +270,6 @@ experiment_synchronised <- function(
 }
 
 .generate_experiment_sample_cells <- function(model) {
-  # satisfy r cmd check
-  sim_time <- to <- time <- NULL
-  
   network <- 
     model$gold_standard$network
   
@@ -247,7 +278,7 @@ experiment_synchronised <- function(
   sim_meta <-
     model$simulations$meta %>%
     mutate(orig_ix = row_number()) %>% 
-    filter(sim_time >= 0, !to %in% end_states | time < 1)
+    filter(.data$sim_time >= 0, !.data$to %in% end_states | .data$time < 1)
   
   params <- model$experiment_params
   
@@ -266,32 +297,30 @@ experiment_synchronised <- function(
   params,
   num_cells
 ) {
-  # satisfy r cmd check
-  pct <- cum_pct <- from <- to <- time <- `.` <- NULL
-  
   network <- 
     network %>%
     mutate(
-      pct = length / sum(length), 
-      cum_pct = cumsum(pct),
-      num_cells = diff(c(0, round(cum_pct * num_cells)))
+      pct = .data$length / sum(.data$length), 
+      cum_pct = cumsum(.data$pct),
+      num_cells = diff(c(0, round(.data$cum_pct * num_cells)))
     ) %>% 
-    select(-pct, -cum_pct)
+    select(-.data$pct, -.data$cum_pct)
   
   map(
     seq_len(nrow(network)),
     function(i) {
       edge <- network %>% slice(i)
       meta <- 
-        inner_join(sim_meta, edge %>% select(from, to), c("from", "to"))
+        inner_join(sim_meta, edge %>% select(.data$from, .data$to), c("from", "to"))
       
       if (nrow(meta) > 1) {
-        meta %>% 
+        met <- meta %>% 
           mutate(
-            density = approxfun(density(time, bw = params$weight_bw))(time),
-            weight = 1 / density
-          ) %>% 
-          {sample(.$orig_ix, size = edge$num_cells, replace = TRUE, prob = .$weight)}
+            density = approxfun(density(.data$time, bw = params$weight_bw))(.data$time),
+            weight = 1 / .data$density
+          )
+        
+        sample(met$orig_ix, size = edge$num_cells, replace = TRUE, prob = met$weight)
       } else {
         NULL
       }
@@ -306,33 +335,33 @@ experiment_synchronised <- function(
   params,
   num_cells
 ) {
-  # satisfy r cmd check
-  sim_time <- t_scale <- timepoint_group <- selectable <- pct <- cum_pct <- timepoint_group <- orig_ix <- NULL
-  
   sim_meta2 <- 
     sim_meta %>% 
     mutate(
-      t_scale = sim_time / (max(sim_time)+1e-10) * params$num_timepoints,
-      timepoint_group = floor(t_scale),
-      selectable = (t_scale - timepoint_group) < (1 - params$pct_between)
+      t_scale = .data$sim_time / (max(.data$sim_time)+1e-10) * params$num_timepoints,
+      timepoint_group = floor(.data$t_scale),
+      selectable = (.data$t_scale - .data$timepoint_group) < (1 - params$pct_between)
     ) %>% 
-    filter(selectable)
+    filter(.data$selectable)
   
   numbers <-
     sim_meta2 %>% 
-    group_by(timepoint_group) %>% 
+    group_by(.data$timepoint_group) %>% 
     summarise(n = n()) %>% 
     mutate(
       pct = n / sum(n), 
-      cum_pct = cumsum(pct),
-      num_cells = diff(c(0, round(cum_pct * num_cells)))
+      cum_pct = cumsum(.data$pct),
+      num_cells = diff(c(0, round(.data$cum_pct * num_cells)))
     )
   
   map2(
     numbers$timepoint_group,
     numbers$num_cells,
     function(gr, num) {
-      sim_meta2 %>% filter(timepoint_group == gr) %>% pull(orig_ix) %>% sample(size = num, replace = TRUE)
+      sim_meta2 %>% 
+        filter(.data$timepoint_group == gr) %>%
+        pull(.data$orig_ix) %>% 
+        sample(size = num, replace = TRUE)
     }
   ) %>% 
     unlist()
@@ -344,7 +373,7 @@ experiment_synchronised <- function(
   
   realcount_ <- model$experiment_params$realcount
   
-  # download realcount if needed-
+  # download realcount if needed
   realcount <- 
     if (is.character(realcount_)) {
       data(realcounts, package = "dyngen", envir = environment())

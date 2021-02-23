@@ -16,6 +16,8 @@
 #' 
 #' @return A dyngen model.
 #' 
+#' @seealso [dyngen] on how to run a complete dyngen simulation
+#' 
 #' @examples
 #' model <- 
 #'   initialise_model(
@@ -24,22 +26,18 @@
 #'   )
 #'   
 #' \donttest{
-#' model <- model %>%
-#'   generate_tf_network() %>%
+#' data("example_model")
+#' model <- example_model %>%
+#'   generate_tf_network() %>% 
 #'   generate_feature_network()
-#'   
+#' 
 #' plot_feature_network(model)
-#'   
-#' model <- model %>%
-#'   generate_kinetics() %>%
-#'   generate_gold_standard() %>%
-#'   generate_cells() %>%
-#'   generate_experiment()
-#' dataset <- wrap_dataset(model)
 #' }
 generate_feature_network <- function(
   model
 ) {
+  model <- .add_timing(model, "3_feature_network", "checks")
+  
   if (model$verbose) cat("Sampling feature network from real network\n")
   
   # verify that this function has all the data it needs
@@ -49,6 +47,7 @@ generate_feature_network <- function(
   )
   
   # process realnet
+  model <- .add_timing(model, "3_feature_network", "process realnet")
   realnet <- model$feature_network_params$realnet
   
   if (is.character(realnet)) {
@@ -79,6 +78,8 @@ generate_feature_network <- function(
   )
   
   # sample target network from realnet
+  model <- .add_timing(model, "3_feature_network", "sample target network")
+  
   if (sample_tfs_per > 0) {
     num_target_start <- seq(1, model$numbers$num_targets, by = sample_tfs_per)
     num_target_stop <- c((num_target_start - 1) %>% tail(-1), model$numbers$num_targets)
@@ -94,6 +95,8 @@ generate_feature_network <- function(
   }
   
   # sample house keeping
+  model <- .add_timing(model, "3_feature_network", "sample housekeeping network")
+  
   if (sample_hks_per > 0) {
     num_hk_start <- seq(1, model$numbers$num_hks, by = sample_hks_per)
     num_hk_stop <- c((num_hk_start - 1) %>% tail(-1), model$numbers$num_hks)
@@ -109,6 +112,8 @@ generate_feature_network <- function(
   }
   
   # return output
+  model <- .add_timing(model, "3_feature_network", "return output")
+  
   model$feature_info <- 
     bind_rows(
       model$feature_info,
@@ -123,7 +128,7 @@ generate_feature_network <- function(
       hk_network
     )
   
-  model
+  model %>% .add_timing("3_feature_network", "end")
 }
 
 #' @export
@@ -176,9 +181,6 @@ feature_network_default <- function(
   num_targets = model$numbers$num_targets, 
   target_index_offset = 0
 ) {
-  # satisfy r cmd check
-  j <- x <- i <- score <- feature_id <- from <- to <- NULL
-  
   requireNamespace("igraph")
   
   # determine desired number of targets for each tf
@@ -203,13 +205,13 @@ feature_network_default <- function(
     realnet %>% 
     Matrix::summary() %>% 
     as.data.frame() %>% 
-    group_by(j) %>% 
-    sample_n(min(n(), sample(1:model$feature_network_params$max_in_degree, 1)), weight = x) %>% 
+    group_by(.data$j) %>% 
+    sample_n(min(n(), sample(seq_len(model$feature_network_params$max_in_degree), 1)), weight = .data$x) %>% 
     ungroup() %>% 
     transmute(
-      i = rownames(realnet)[i], 
-      j = colnames(realnet)[j],
-      weight = x
+      i = rownames(realnet)[.data$i], 
+      j = colnames(realnet)[.data$j],
+      weight = .data$x
     ) %>%
     igraph::graph_from_data_frame(vertices = colnames(realnet))
   
@@ -224,10 +226,10 @@ feature_network_default <- function(
   )
   features_sel <- 
     enframe(page_rank$vector, "feature_id", "score") %>% 
-    mutate(score = score + runif(n(), 0, 1e-15)) %>% 
-    filter(!feature_id %in% tf_names) %>% 
-    sample_n(num_targets, weight = score) %>% 
-    pull(feature_id) %>% 
+    mutate(score = .data$score + runif(n(), 0, 1e-15)) %>% 
+    filter(!.data$feature_id %in% tf_names) %>% 
+    sample_n(num_targets, weight = .data$score) %>% 
+    pull(.data$feature_id) %>% 
     unique()
   
   # get induced subgraph
@@ -238,9 +240,9 @@ feature_network_default <- function(
     subgr %>% 
     igraph::as_data_frame() %>% 
     as_tibble() %>% 
-    select(from, to) %>% 
+    select(.data$from, .data$to) %>% 
     # remove connections to tfs (to avoid ruining the given module network)
-    filter(!to %in% tf_names)
+    filter(!.data$to %in% tf_names)
   
   # some targets may be missing
   missing_targets <- setdiff(features_sel, target_regnet$to)
@@ -269,7 +271,7 @@ feature_network_default <- function(
   # create target info
   target_info <- 
     tibble(
-      feature_id = target_mapper,
+      feature_id = unname(target_mapper),
       is_tf = FALSE,
       is_hk = FALSE,
       burn = TRUE # extra genes should be available during burn in
@@ -289,8 +291,6 @@ feature_network_default <- function(
   num_hks = model$numbers$num_hks, 
   hk_index_offset = 0
 ) {
-  j <- x <- i <- `.` <- from <- to <- NULL
-  
   requireNamespace("igraph")
   
   # convert to igraph
@@ -298,20 +298,20 @@ feature_network_default <- function(
     realnet %>% 
     Matrix::summary() %>% 
     as.data.frame() %>% 
-    group_by(j) %>% 
-    sample_n(min(n(), sample(1:model$feature_network_params$max_in_degree, 1)), weight = x) %>% 
+    group_by(.data$j) %>% 
+    sample_n(min(n(), sample(seq_len(model$feature_network_params$max_in_degree), 1)), weight = .data$x) %>% 
     ungroup() %>% 
     transmute(
-      i = rownames(realnet)[i], 
-      j = colnames(realnet)[j],
-      weight = x
+      i = rownames(realnet)[.data$i], 
+      j = colnames(realnet)[.data$j],
+      weight = .data$x
     ) %>%
     igraph::graph_from_data_frame(vertices = colnames(realnet))
   
   hk_names <- gr %>% 
     igraph::bfs(sample.int(ncol(realnet), 1), neimode = "all") %>% 
-    .[["order"]] %>% 
-    .[seq_len(num_hks)] %>% 
+    `[[`("order") %>% 
+    `[`(seq_len(num_hks)) %>% 
     names()
   
   hk_regnet <- 
@@ -319,8 +319,8 @@ feature_network_default <- function(
     igraph::induced_subgraph(hk_names) %>% 
     igraph::as_data_frame() %>% 
     as_tibble() %>% 
-    select(from, to) %>% 
-    filter(from != to)
+    select(.data$from, .data$to) %>% 
+    filter(.data$from != .data$to)
   
   # rename hk features
   hk_mapper <- 
@@ -331,12 +331,12 @@ feature_network_default <- function(
   
   hk_regnet <- 
     hk_regnet %>% 
-    mutate(from = hk_mapper[from], to = hk_mapper[to])
+    mutate(from = hk_mapper[.data$from], to = hk_mapper[.data$to])
   
   # create target info
   hk_info <- 
     tibble(
-      feature_id = hk_mapper,
+      feature_id = unname(hk_mapper),
       is_tf = FALSE,
       is_hk = TRUE,
       burn = TRUE # extra genes should be available during burn in

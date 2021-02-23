@@ -7,10 +7,13 @@
 #' @param model A dyngen intermediary model for which the kinetics of the feature network has been generated with [generate_kinetics()].
 #' @param tau The time step of the ODE algorithm used to generate the gold standard.
 #' @param census_interval A granularity parameter of the gold standard time steps. Should be larger than or equal to `tau`.
+#' @param simulate_targets Also simulate the targets during the gold standard simulation
 #' 
 #' @export
 #' 
 #' @return A dyngen model.
+#' 
+#' @seealso [dyngen] on how to run a complete dyngen simulation
 #' 
 #' @examples
 #' model <- 
@@ -18,59 +21,57 @@
 #'     backbone = backbone_bifurcating(),
 #'     gold_standard = gold_standard_default(tau = .01, census_interval = 1)
 #'   )
-#'   
+#' 
 #' \donttest{
-#' model <- model %>%
-#'   generate_tf_network() %>%
-#'   generate_feature_network() %>%
-#'   generate_kinetics() %>%
-#'   generate_gold_standard()
+#' data("example_model")
+#' model <- example_model %>% generate_gold_standard()
 #'   
 #' plot_gold_simulations(model)
 #' plot_gold_mappings(model)
 #' plot_gold_expression(model)
-#'   
-#' model <- model %>%
-#'   generate_cells() %>%
-#'   generate_experiment
-#' 
-#' dataset <- wrap_dataset(model)
 #' }
 generate_gold_standard <- function(model) {
   model$gold_standard <- list()
   
   # compute changes in modules along the edges
   if (model$verbose) cat("Generating gold standard mod changes\n")
+  model <- .add_timing(model, "5_gold_standard", "generate mod changes")
   model$gold_standard$mod_changes <- .generate_gold_standard_mod_changes(model$backbone$expression_patterns)
   
   # precompile propensity functions
   if (model$verbose) cat("Precompiling reactions for gold standard\n")
+  model <- .add_timing(model, "5_gold_standard", "precompiling reactions for gold standard")
   prep_data <- .generate_gold_precompile_reactions(model)
   
   # run gold standard simulations
   if (model$verbose) cat("Running gold simulations\n")
+  model <- .add_timing(model, "5_gold_standard", "running gold simulations")
   simulations <- .generate_gold_standard_simulations(model, prep_data)
   model$gold_standard$meta <- simulations$meta
   model$gold_standard$counts <- simulations$counts
   
   # do combined dimred
+  model <- .add_timing(model, "5_gold_standard", "compute dimred")
   model <- model %>% calculate_dimred()
   
   # construct simulation network from dimred
+  model <- .add_timing(model, "5_gold_standard", "generate simulation network from dimred")
   model$gold_standard$network <- .generate_gold_standard_generate_network(model)
   
-  model
+  .add_timing(model, "5_gold_standard", "end")
 }
 
 #' @export
 #' @rdname generate_gold_standard
 gold_standard_default <- function(
   tau = 30 / 3600,
-  census_interval = 10 / 60
+  census_interval = 10 / 60,
+  simulate_targets = FALSE
 ) {
   lst(
     tau,
-    census_interval
+    census_interval,
+    simulate_targets
   )
 }
 
@@ -107,7 +108,10 @@ gold_standard_default <- function(
   
   # fetch paraneters and settings
   sim_system <- model$simulation_system
-  tf_info <- model$feature_info %>% filter(is_tf)
+  tf_info <- model$feature_info 
+  if (!model$gold_standard_params$simulate_targets) {
+    tf_info <- tf_info %>% filter(is_tf)
+  }
   
   # select relevant functions
   tf_molecules <- tf_info %>% select(mol_premrna, mol_mrna, mol_protein) %>% gather(col, val) %>% pull(val)
@@ -144,7 +148,13 @@ gold_standard_default <- function(
   mod_changes <- model$gold_standard$mod_changes
   gold_params <- model$gold_standard_params
   sim_system <- model$simulation_system
-  tf_info <- model$feature_info %>% filter(is_tf)
+  tf_info <- model$feature_info
+  
+  # find out whether to simulate the targets or not (default: no)
+  sim_targets <- model$gold_standard_params$simulate_targets
+  if (!sim_targets) {
+    tf_info <- tf_info %>% filter(is_tf)
+  }
   
   # determine ode algorithm
   algo <- GillespieSSA2::ode_em(tau = gold_params$tau, noise_strength = 0)
@@ -184,7 +194,7 @@ gold_standard_default <- function(
     gold_sim_modules[[to_]] <- mods
     
     # which tfs are on
-    tfs_on <- tf_info %>% filter(module_id %in% mods)
+    tfs_on <- tf_info %>% filter((is.na(module_id) & sim_targets) | module_id %in% mods)
     molecules_on <- tfs_on %>% select(mol_premrna, mol_mrna, mol_protein) %>% gather(col, val) %>% pull(val)
     
     # fetch initial state
@@ -258,16 +268,4 @@ gold_standard_default <- function(
       length = time / sum(time) * length(time),
       directed = TRUE
     )
-  # gs_dimred <- model$gold_standard$dimred
-  # gs_meta <- model$gold_standard$meta
-  # 
-  # gs_meta %>% 
-  #   filter(!burn) %>% 
-  #   mutate(i = row_number()) %>% 
-  #   group_by(from, to) %>% 
-  #   summarise(
-  #     length = sqrt(sum((gs_dimred[i[-1], , drop = FALSE] - gs_dimred[i[-n()], , drop = FALSE])^2)),
-  #     directed = TRUE
-  #   ) %>% 
-  #   ungroup()
 }

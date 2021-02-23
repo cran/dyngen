@@ -43,7 +43,7 @@
 #' 
 #' @return A dyngen backbone.
 #' 
-#' @seealso [list_backbones()] for a list of all backbone methods.
+#' @seealso [dyngen] on how to run a dyngen simulation
 #' 
 #' @examples
 #' library(tibble)
@@ -61,31 +61,15 @@
 #'   ), 
 #'   expression_patterns = tribble(
 #'     ~from, ~to,  ~module_progression, ~start, ~burn, ~time,
-#'     "s0",  "s1", "+M1",               TRUE,   TRUE,  15,
-#'     "s1",  "s2", "+M2,+M3",           FALSE,  FALSE, 30
+#'     "s0",  "s1", "+M1",               TRUE,   TRUE,  30,
+#'     "s1",  "s2", "+M2,+M3",           FALSE,  FALSE, 80
 #'   )
 #' )
-#' 
-#' \donttest{
-#' model <- 
-#'   initialise_model(backbone = backbone) %>%
-#'   generate_tf_network() %>%
-#'   generate_feature_network() %>%
-#'   generate_kinetics() %>%
-#'   generate_gold_standard() %>%
-#'   generate_cells() %>%
-#'   generate_experiment() 
-#'   
-#' dataset <- wrap_dataset(model)
-#' }
 backbone <- function(
   module_info,
   module_network,
   expression_patterns
 ) {
-  # satisfy r cmd check
-  `.` <- module_id <- group <- group_colour <- basal <- NULL
-  
   assert_that(
     is.data.frame(module_info),
     module_info %has_names% c("module_id", "basal", "burn", "independence"),
@@ -121,9 +105,11 @@ backbone <- function(
     expression_patterns$module_progression %>%
     strsplit("[,|]") %>%
     unlist() %>%
-    unique() %>% 
-    gsub("[+-]", "", .)
-  assert_that(tmp_modules %all_in% module_info$module_id)
+    unique()
+  assert_that(
+    gsub("[+-]", "", tmp_modules) %all_in% module_info$module_id,
+    msg = "Not all modules listed under `expression_Patterns$module_progression` are in `module_info$module_id`."
+  )
   
   if (! module_info %has_name% "color") {
     if (all(grepl("^[a-zA-Z]*[0-9]*$", module_info$module_id))) {
@@ -131,19 +117,19 @@ backbone <- function(
       module_info <-
         module_info %>% 
         mutate(
-          group = gsub("[0-9]*$", "", module_id)
+          group = gsub("[0-9]*$", "", .data$module_id)
         )
       group_names <- unique(module_info$group)
       group_colours <- grDevices::rainbow(length(group_names))
       
       module_info <- module_info %>% 
-        group_by(group) %>% 
+        group_by(.data$group) %>% 
         mutate(
-          group_colour = group_colours[match(group, group_names)],
-          color = colour_brighten(group_colour, rev(seq(1, .4, length.out = n())))
+          group_colour = group_colours[match(.data$group, group_names)],
+          color = colour_brighten(.data$group_colour, rev(seq(1, .4, length.out = n())))
         ) %>% 
         ungroup() %>% 
-        select(-group, -group_colour)
+        select(-.data$group, -.data$group_colour)
     } else {
       module_info <-
         module_info %>% 
@@ -152,7 +138,7 @@ backbone <- function(
   }
   
   # add burn modules to burn transition
-  extra_modules <- module_info %>% filter(basal > 0) %>% pull(module_id)
+  extra_modules <- module_info %>% filter(.data$basal > 0) %>% pull(.data$module_id)
   if (length(extra_modules) > 0) {
     expression_patterns$module_progression[[1]] <- 
       c(
@@ -186,9 +172,9 @@ backbone <- function(
 #' @export
 #' @rdname backbone_models
 #' 
-#' @seealso [backbone()] for more information on the data structures that define the backbone.
-#' 
 #' @return A list of all the available backbone generators.
+#' 
+#' @seealso [dyngen] on how to run a dyngen simulation
 #' 
 #' @examples
 #' names(list_backbones())
@@ -211,10 +197,6 @@ backbone <- function(
 #' model <- initialise_model(
 #'   backbone = bb
 #' )
-#' 
-#' \donttest{
-#' out <- generate_dataset(model)
-#' }
 list_backbones <- function() {
   list(
     bifurcating = backbone_bifurcating,
