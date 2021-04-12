@@ -2,7 +2,7 @@ Type: Package
 Package: dyngen
 Title: A Multi-Modal Simulator for Spearheading Single-Cell Omics
         Analyses
-Version: 1.0.0
+Version: 1.0.1
 Authors@R: 
     c(person(given = "Robrecht",
              family = "Cannoodt",
@@ -36,10 +36,10 @@ Encoding: UTF-8
 LazyData: TRUE
 RoxygenNote: 7.1.1
 NeedsCompilation: no
-Packaged: 2021-02-23 12:44:49 UTC; rcannood
+Packaged: 2021-04-12 20:37:10 UTC; rcannood
 Author: Robrecht Cannoodt [aut, cre, cph]
     (<https://orcid.org/0000-0003-3641-729X>),
   Wouter Saelens [aut] (<https://orcid.org/0000-0002-7114-6248>)
 Maintainer: Robrecht Cannoodt <rcannood@gmail.com>
 Repository: CRAN
-Date/Publication: 2021-02-23 13:00:06 UTC
+Date/Publication: 2021-04-12 21:10:03 UTC
