@@ -9,6 +9,9 @@ get_timings(model)
 \arguments{
 \item{model}{A dyngen object}
 }
+\value{
+A data frame with columns \code{"group"}, \code{"task"}, \code{"time_elapsed"}.
+}
 \description{
 Return the timings of each of the dyngen steps
 }

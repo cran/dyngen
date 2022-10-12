@@ -1,3 +1,16 @@
+# dyngen 1.0.5
+
+* MINOR CHANGE: Refactor matrix coercion thanks to Matrix 1.5-0.
+
+* DOCUMENTATION: Remove comments from `generate_dataset()`.
+
+* DOCUMENTATION: Extend usage of `wrap_dataset()`.
+
+* DOCUMENTATION: Document outputs of `combine_models()` and `get_timings()`.
+
+* BUG FIX `calculate_dimred()`: Force deep copy of matrix to avoid error message:
+  "Error in x$.self$finalize() : attempt to apply non-function".
+
 # dyngen 1.0.4
 
 * BUG FIX `plot_feature_network()`: Added workaround for thomasp85/ggforce#273.
