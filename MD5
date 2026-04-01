@@ -1,7 +1,7 @@
-fa18a6d8ec9f59704dbe7f796f3b8c79 *DESCRIPTION
+b3c2eb5d91cc41a8307189e5e79cde23 *DESCRIPTION
 ab074b63ac261f17d3b7d1fa507ef527 *LICENSE
 54ae34bc9130817f3e4c66a10c10354e *NAMESPACE
-616c313f95773fcd7c56c67780013018 *NEWS.md
+d46c745e6e36a8a7ceab3d7924c95f33 *NEWS.md
 e86da0c907785616c245335d1b770c87 *R/0a_backbone.R
 6374880134f46688108ebfc572d15d16 *R/0b_modnet_pieces.R
 a99637826aa922a6b254f9635c1ee8b8 *R/0c_backbone_lego.R
@@ -13,7 +13,7 @@ c97fa8a7cfc55f267fca5703dc73c97f *R/4_kinetics.R
 437c25200d329b7764f066605af58831 *R/5_gold_standard.R
 000264a047db034b09cee21abb5c86fa *R/6_simulation.R
 ed6cef554387ee30b573ac5eece8b3aa *R/7_experiment.R
-7ab74c5c4e83700b4fbd80b042f6a3f1 *R/8_convert.R
+8b0d7cb9d9752c3b1180c7558ed4e22c *R/8_convert.R
 6e22c7f981f94e80b488df99b24a422d *R/caching.R
 c076918908bc00ba15fffe8ad354e221 *R/colour_brighten.R
 c3df08a193e9e6988d31a6076b0dd8cc *R/combine_models.R
@@ -29,7 +29,7 @@ cadddf7ebfa877488e627c39e2795307 *R/reexports.R
 0636f6b9a2e82e169d813323dbc1a3ad *R/simtime_from_backbone.R
 b90dd27bef6a04827228ac68d330c1df *R/timings.R
 a95e1c0fec9131907bf42abc53e42cbc *README.md
-efc7aea33f4a328975b4641b0624f687 *build/vignette.rds
+4f571d94821d1cd2fd4950dda6444de8 *build/vignette.rds
 3d689d6e19c17b2569f01d554b5c7030 *data/example_model.rda
 6ccb0ab640c17865997eff2c93bb22d8 *data/realcounts.rda
 577838d68401ca076b3f6c8a877c8754 *data/realnets.rda
@@ -42,7 +42,7 @@ c213465810c96cc80206e4f6d7701d2c *inst/doc/installation.html.asis
 540317ffa9054870f1c8b5fb1495253c *man/backbone_models.Rd
 60bb0850731b7a222f1459f0476db0fe *man/bblego.Rd
 231eb475683efe8454706ca973a71d92 *man/combine_models.Rd
-8ab66cb87840c837fa9cafe1123af6f7 *man/convert.Rd
+cef89a03fbb87aa6b449e32dcd09587e *man/convert.Rd
 43e693bd753c5c5f85f9d134bfbed1fb *man/dyngen-package.Rd
 733e7922b738e4995b6a58c969c8dfdd *man/example_model.Rd
 93b3fb01daee21a88f980b3e38a1ae77 *man/figures/logo.png
